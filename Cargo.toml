@@ -3,6 +3,10 @@ name = "rs_assert"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = []
+enable_asserts = []
+interactive_failures = ["enable_asserts"]
+panic_on_failures = ["enable_asserts"]
 
 [dependencies]
