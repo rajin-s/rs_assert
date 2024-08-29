@@ -40,8 +40,8 @@ impl CheckInfo
 	{
 		match self.file_path.rfind(std::path::MAIN_SEPARATOR)
 		{
-			Some(index) => &self.file_path[index + 1..],
-			None => self.file_path,
+			Some(index) 	=> &self.file_path[index + 1..],
+			None 			=> self.file_path,
 		}
 	}
 
@@ -147,10 +147,10 @@ pub fn print_nice_backtrace()
 
 	let backtrace_string = format!("{}", backtrace);
 
-	struct Frame
+	struct Frame<'a>
 	{
 		function 	: String,
-		source		: String,
+		source		: &'a str,
 	}
 
 	let mut include_frames = false;
@@ -161,10 +161,9 @@ pub fn print_nice_backtrace()
 	{
 		let source = match lines.next()
 		{
-			Some(line) =>
+			Some(source_line) =>
 			{
-				let trimmed = line.trim();
-
+				let trimmed = source_line.trim();
 				match trimmed.strip_prefix("at ")
 				{
 					Some(clean) => clean,
@@ -172,7 +171,7 @@ pub fn print_nice_backtrace()
 				}
 			}
 			None => "",
-		}.to_owned();
+		};
 
 		// Ignore this call (and everything downstream) at the start of the trace
 
