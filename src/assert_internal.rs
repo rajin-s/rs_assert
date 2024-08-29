@@ -167,7 +167,7 @@ pub fn print_nice_backtrace()
 				match trimmed.strip_prefix("at ")
 				{
 					Some(clean) => clean,
-					None => trimmed,
+					None 		=> trimmed,
 				}
 			}
 			None => "",
@@ -197,7 +197,7 @@ pub fn print_nice_backtrace()
 		let raw_function = match function_line.find(": ")
 		{
 			Some(index) => &function_line[index+2..],
-			None => function_line,
+			None 		=> function_line,
 		};
 
 		// Replace outermost <> brackets with <...>
