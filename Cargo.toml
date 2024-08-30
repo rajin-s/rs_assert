@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = []
+default = ["interactive_failures"]
 enable_asserts = []
 interactive_failures = ["enable_asserts"]
 panic_on_failures = ["enable_asserts"]
 
 [dependencies]
+assert_macro = { path = "./assert_macro" }

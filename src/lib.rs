@@ -1,5 +1,17 @@
-// rs_assert library
+#![feature(allocator_api)]			// for scratch allocator
+#![feature(alloc_layout_extra)]		//  ...
+
+
+
+// General library config
 
 pub mod config;
-pub mod assert;
+
+// Assertions
+
 pub mod assert_internal;
+pub use assert_macro::*;
+
+// Scratch allocation
+
+pub mod scratch;

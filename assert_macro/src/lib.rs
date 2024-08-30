@@ -1,6 +1,10 @@
-#![allow(unused_imports)]
-
-use crate::*;
+// BB (rs) Having this be its own library crate is super janky. Thus far, this seems
+//  to be the only way to reliably get the debug_break!() call to cause a breakpoint
+//  in the original source file, rather that in the file that has the macro definitions.
+//
+//  Specifically, having the macro live in the rsrs crate itself causes it to behave
+//  properly inside any external crate that calls it, but the debugger ends up inside
+//  the macro definition if it's called from within the rsrs crate itself.
 
 
 
@@ -15,10 +19,8 @@ use crate::*;
 #[macro_export]
 macro_rules! debug_break
 {
-	() => { unsafe { std::arch::asm!("int 3"); } }
+	() => { std::arch::asm!("int3"); }
 }
-
-
 
 // Common macro for validating some code assumption. Checks can be compiled out
 //  entirely (based on config features), so shouldn't produce any side effects.
@@ -70,8 +72,6 @@ macro_rules! ASSERT
 		ASSERT!{ $f_check, "Failed {}", stringify!($f_check) };
 	};
 }
-
-
 
 #[macro_export]
 macro_rules! FAIL
