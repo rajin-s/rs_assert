@@ -15,3 +15,4 @@ pub use assert_macro::*;
 // Scratch allocation
 
 pub mod scratch;
+pub use scratch::*;
