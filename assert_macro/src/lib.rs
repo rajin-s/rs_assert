@@ -48,8 +48,10 @@ macro_rules! ASSERT
 													file!(),
 													line!());
 
-				eprint!("ERROR @ {}:{} :: ", CHECK_INFO.file_name(), CHECK_INFO.line_number);
-				eprintln!($($e,)*);
+				assert_internal::print_header(
+					CHECK_INFO.file_name(),
+					CHECK_INFO.line_number,
+					&format!($($e,)*));
 
 				assert_internal::print_nice_backtrace();
 

@@ -138,8 +138,23 @@ impl CheckInfo
 	}
 }
 
+pub fn print_header(file_name : &str, line_number : u32, description : &str)
+{
+	use colored::*;
+	eprintln!(
+		"{} {}{}{}{} :: {}",
+		"🛑 ERROR ".on_red(),
+		"at ".dimmed(),
+		file_name.dimmed(),
+		":".dimmed(),
+		format!("{}", line_number).dimmed(),
+		description.red())
+}
+
 pub fn print_nice_backtrace()
 {
+	use colored::*;
+
 	let backtrace = std::backtrace::Backtrace::force_capture();
 
 	// BB (rs) AFAIK it's currently not possible to get nicely printed frames while
@@ -348,17 +363,19 @@ pub fn print_nice_backtrace()
 			};
 
 			eprintln!(
-				"{:>6} | {:max_function_width$} | rust internal",
-				depth_string,
-				displayed_function);
+				"{:>6} | {:max_function_width$} | {}",
+				depth_string.blue(),
+				displayed_function,
+				"rust_internal".dimmed());
 		}
 		else
 		{
 			eprintln!(
-				"{:>6} | {:max_function_width$} | at {}",
-				depth,
+				"{:>6} | {:max_function_width$} | {}{}",
+				format!("{}", depth).blue(),
 				frame.function,
-				frame.source);
+				"at ".dimmed(),
+				frame.source.dimmed());
 		}
 	}
 }

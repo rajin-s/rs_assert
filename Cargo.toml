@@ -11,3 +11,7 @@ panic_on_failures = ["enable_asserts"]
 
 [dependencies]
 assert_macro = { path = "./assert_macro" }
+
+# External dependencies
+
+colored = "2"
