@@ -482,21 +482,6 @@ impl ScratchContext
 		Self::SPACE.with(|space| Self::new_impl(space.borrow_mut().get_ref()))
 	}
 
-	pub fn new_vec<T>(&self) -> Vec<T, &Self>
-	{
-		Vec::new_in(self)
-	}
-
-	pub fn vec_with_capacity<T>(&self, alloc_count : usize) -> Vec<T, &Self>
-	{
-		Vec::with_capacity_in(alloc_count, self)
-	}
-
-	pub fn new_box<T : Sized>(&self, value : T) -> Box<T, &Self>
-	{
-		Box::new_in(value, self)
-	}
-
 	fn new_impl(mut space : ScratchSpaceRef) -> Self
 	{
 		let state = space.push_new_context();
@@ -535,6 +520,23 @@ impl ScratchContext
 		mut space 	: ScratchSpaceRef)
 	{
 		space.deallocate(ptr, layout, &mut self.state.borrow_mut())
+	}
+	
+	// NOTE (rs) Exposing wrappers for Vec::new_in and friends, since they require an unstable feature
+
+	pub fn new_vec<T>(&self) -> Vec<T, &Self>
+	{
+		Vec::new_in(self)
+	}
+
+	pub fn vec_with_capacity<T>(&self, alloc_count : usize) -> Vec<T, &Self>
+	{
+		Vec::with_capacity_in(alloc_count, self)
+	}
+
+	pub fn new_box<T : Sized>(&self, value : T) -> Box<T, &Self>
+	{
+		Box::new_in(value, self)
 	}
 }
 
