@@ -30,11 +30,12 @@ impl Address
 	pub fn byte_offset(&self, byte_offset : usize) -> Self
 	{
 		// NOTE (rs) Using byte_offset is safe, since it's impossible to dereference
-		//  this pointer
+		//  this pointer. The resulting address could well be invalid, but it's up to
+		//  the caller to decide if they care / how they want to handle it.
 
 		unsafe
 		{
-			Self::from_ptr(self.ptr.byte_offset(byte_offset as isize))
+			Self::from_ptr(self.ptr.offset(byte_offset as isize))
 		}
 	}
 }
@@ -107,12 +108,6 @@ impl<const SIZE : usize> ScratchSpace<SIZE>
 
 impl ScratchSpaceRef<'_>
 {
-	pub fn buffer_range(&self) -> std::ops::Range<Address>
-	{
-		let start_addr = Address::from_ref(&self.buffer[0]);
-		start_addr..start_addr.byte_offset(self.buffer.len())
-	}
-
 	pub fn allocated_range(&self) -> std::ops::Range<Address>
 	{
 		let start_addr = Address::from_ref(&self.buffer[0]);
@@ -485,6 +480,21 @@ impl ScratchContext
 	pub fn new() -> Self
 	{
 		Self::SPACE.with(|space| Self::new_impl(space.borrow_mut().get_ref()))
+	}
+
+	pub fn new_vec<T>(&self) -> Vec<T, &Self>
+	{
+		Vec::new_in(self)
+	}
+
+	pub fn vec_with_capacity<T>(&self, alloc_count : usize) -> Vec<T, &Self>
+	{
+		Vec::with_capacity_in(alloc_count, self)
+	}
+
+	pub fn new_box<T : Sized>(&self, value : T) -> Box<T, &Self>
+	{
+		Box::new_in(value, self)
 	}
 
 	fn new_impl(mut space : ScratchSpaceRef) -> Self

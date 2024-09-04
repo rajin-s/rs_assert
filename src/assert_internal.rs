@@ -78,7 +78,7 @@ impl CheckInfo
 
 				// Display controls prompt
 				
-				println!("");
+				print!("\n");
 				println!("  [{}] break", char::from(DO_BREAK));
 				println!("  [{}] ignore instance", char::from(SKIP_INSTANCE));
 				println!("  [{}] ignore future instances", char::from(SKIP_CHECK));
@@ -89,7 +89,7 @@ impl CheckInfo
 
 				// Wait for input to match
 		
-				let mut input_buffer = [0;8];
+				let mut input_buffer = [0; 8];
 		
 				loop
 				{
@@ -128,10 +128,10 @@ impl CheckInfo
 						_ =>
 						{
 							// Continue waiting for valid input
+
+							continue;
 						}
 					}
-
-					unreachable!("Failed to get input for interactive assert?");
 				}
 			}
 		}
@@ -251,17 +251,16 @@ pub fn print_nice_backtrace()
 		{
 			const PREFIX_TRIMMED : &str = "... ";
 
-			let min_byte_index = match function
+			let start_byte_offset = match function
 											.char_indices()
 											.rev()
-											.skip(MAX_FUNCTION_LENGTH - 1)
-											.next()
+											.nth(MAX_FUNCTION_LENGTH - 1)
 			{
 				Some((byte_index, _ch)) => byte_index,
 				None => 0,
 			};
 
-			function = format!("{}{}", PREFIX_TRIMMED, &function.as_str()[min_byte_index..]);
+			function = format!("{}{}", PREFIX_TRIMMED, &function.as_str()[start_byte_offset..]);
 		}
 
 		frames.push(Frame { function, source });
