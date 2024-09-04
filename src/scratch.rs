@@ -96,7 +96,7 @@ impl<const SIZE : usize> ScratchSpace<SIZE>
 		}
 	}
 
-	pub fn get_ref<'a>(&'a mut self) -> ScratchSpaceRef<'a>
+	pub fn get_ref(&mut self) -> ScratchSpaceRef<'_>
 	{
 		ScratchSpaceRef
 		{
