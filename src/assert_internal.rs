@@ -78,7 +78,7 @@ impl CheckInfo
 
 				// Display controls prompt
 				
-				print!("\n");
+				println!();
 				println!("  [{}] break", char::from(DO_BREAK));
 				println!("  [{}] ignore instance", char::from(SKIP_INSTANCE));
 				println!("  [{}] ignore future instances", char::from(SKIP_CHECK));

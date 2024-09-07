@@ -35,7 +35,7 @@ impl Address
 
 		unsafe
 		{
-			Self::from_ptr(self.ptr.offset(byte_offset as isize))
+			Self::from_ptr(self.ptr.add(byte_offset))
 		}
 	}
 }
@@ -490,7 +490,7 @@ impl ScratchContext
 
 	fn drop_impl(&mut self, mut space : ScratchSpaceRef)
 	{
-		space.pop_context(&mut self.state.borrow_mut());
+		space.pop_context(&self.state.borrow_mut());
 	}
 
 	fn allocate_impl(
@@ -545,6 +545,14 @@ impl Drop for ScratchContext
 	fn drop(&mut self)
 	{
 		Self::SPACE.with(|space| self.drop_impl(space.borrow_mut().get_ref()))
+	}
+}
+
+impl Default for ScratchContext
+{
+	fn default() -> Self
+	{
+		Self::new()
 	}
 }
 
