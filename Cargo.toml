@@ -3,11 +3,38 @@ name = "rsrs"
 version = "0.1.0"
 edition = "2021"
 
+
+
 [features]
-default = ["interactive_failures"]
+
+default = []
+
+# Assert features
+
 enable_asserts = []
 interactive_failures = ["enable_asserts"]
 panic_on_failures = ["enable_asserts"]
+
+# ID features
+
+name_cache = []
+
+# Build Modes
+
+"mode.normal" = [
+	"interactive_failures",
+	"name_cache",
+]
+
+"mode.test" = [
+	"panic_on_failures",
+	"name_cache"
+]
+
+"mode.release" = [
+]
+
+
 
 [dependencies]
 assert_macro = { path = "./assert_macro" }
@@ -15,3 +42,4 @@ assert_macro = { path = "./assert_macro" }
 # External dependencies
 
 colored = "2"
+lazy_static = "1"
