@@ -87,3 +87,12 @@ macro_rules! FAIL
 		FAIL!{ $($e,)* }
 	};
 }
+
+
+
+/// Helpers for defining versions of functions that may or may not want to actually
+/// run checks in addition to handling error cases.
+
+pub type DoAsserts = u8;
+pub const TRIP_ASSERTS 	: DoAsserts = 0;
+pub const SKIP_ASSERTS 	: DoAsserts = 1;

@@ -21,3 +21,7 @@ pub use scratch::*;
 
 pub mod id;
 pub use id::*;
+
+// Memory images
+
+pub mod blob;
