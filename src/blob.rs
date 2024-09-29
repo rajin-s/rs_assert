@@ -11,7 +11,8 @@ trait LayoutInfo
 }
 
 impl<T> LayoutInfo for T
-	where T : Sized
+where
+	T : Sized
 {
 	const BYTE_COUNT 		: usize = size_of::<T>();
 	const ALIGNMENT_SIZE 	: usize = align_of::<T>();
@@ -66,7 +67,8 @@ macro_rules! ASSERT_LAYOUT_EQ
 pub trait WriteBlob
 {
 	fn handle_references<T>(&self, pass : &mut T, self_location : BlobLocation)
-		where T : BlobWriterPass;
+	where
+		T : BlobWriterPass;
 }
 
 
@@ -301,7 +303,8 @@ impl Blob
 	}
 
 	pub fn write<T>(value : &T) -> Self
-		where T : WriteBlob
+	where
+		T : WriteBlob
 	{
 		let mut writer = BlobWriter::new();
 		let data_start_location = writer.write_slice(std::slice::from_ref(value));
@@ -562,7 +565,8 @@ pub trait BlobWriterPass : Sized
 	// Common blob writer implementation, not expected to be overridden
 
 	fn add_slice<T>(&mut self, values : &[T]) -> BlobLocation
-		where T : WriteBlob
+	where
+		T : WriteBlob
 	{
 		// Early-out if there is no data to write. The specific offset returned doesn't
 		//  matter since it'll never be read, so use a recognizable signature
@@ -644,7 +648,8 @@ pub trait BlobWriterPass : Sized
 	}
 
 	fn handle_vec<T>(&mut self, self_location : BlobLocation, values : &Vec<T>)
-		where T : WriteBlob
+	where
+		T : WriteBlob
 	{
 		// Write out a contigious slice continaining all the values
 
@@ -707,7 +712,8 @@ impl BlobWriter
 	/// returns location of the start of the slice (post-padding)
 
 	fn write_slice<T>(&mut self, slice : &[T]) -> BlobLocation
-		where T : WriteBlob
+	where
+		T : WriteBlob
 	{
 		ASSERT! { !slice.is_empty(), "Should early exit before calling write_slice with no data" }
 
@@ -874,7 +880,8 @@ where
 	T : HasNoReferences
 {
 	fn handle_references<Pass>(&self, _pass : &mut Pass, _self_location : BlobLocation)
-		where Pass : BlobWriterPass
+	where
+		Pass : BlobWriterPass
 	{}
 }
 
@@ -900,10 +907,12 @@ impl_has_no_references!
 // Standard reference types have special handling inside BlobWriterPass
 
 impl<T> WriteBlob for Vec<T>
-	where T : WriteBlob
+where
+	T : WriteBlob
 {
 	fn handle_references<Pass>(&self, pass : &mut Pass, self_location : BlobLocation)
-		where Pass : BlobWriterPass
+	where
+		Pass : BlobWriterPass
 	{
 		pass.handle_vec(self_location, self);
 	}
@@ -941,7 +950,8 @@ const VEC_BLOB_SIGNATURE 		: usize = compute_signature("VEC*BLOB");
 const EMPTY_VEC_SIGNATURE 		: usize = compute_signature("EMPTYVEC");
 
 const fn compute_signature<T>(text : &'static str) -> T
-	where T : Sized+Copy
+where
+	T : Sized+Copy
 {
 	let bytes = text.as_bytes();
 	assert!(bytes.len() == T::BYTE_COUNT);

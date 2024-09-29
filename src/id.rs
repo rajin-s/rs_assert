@@ -141,7 +141,8 @@ impl<T> Hash for Id<T>
 }
 
 impl<T> std::fmt::Display for Id<T>
-	where T : IdType
+where
+	T : IdType
 {
 	fn fmt(&self, formatter : &mut std::fmt::Formatter) -> std::fmt::Result
 	{
@@ -156,7 +157,8 @@ impl<T> std::fmt::Display for Id<T>
 }
 
 impl<T> std::fmt::Debug for Id<T>
-	where T : IdType
+where
+	T : IdType
 {
 	fn fmt(&self, formatter : &mut std::fmt::Formatter<'_>) -> std::fmt::Result
 	{
@@ -324,7 +326,8 @@ mod id_internal
 
 #[allow(unused_variables)]
 pub fn init_name_cache<'a, StringIter>(name_strings : StringIter)
-	where StringIter : std::iter::Iterator<Item = &'a &'a str> + Clone
+where
+	StringIter : std::iter::Iterator<Item = &'a &'a str> + Clone
 {
 	#[cfg(feature="name_cache")]
 	{
