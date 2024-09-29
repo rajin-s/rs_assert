@@ -174,8 +174,8 @@ pub struct Blob
 
 	bytes : Vec<u8>,
 
-	/// True: 	References in the blob are buffer offsets
-	/// False: 	References in the blob have been "patched" into real rust structs
+	/// True:  References in the blob are buffer offsets
+	/// False: References in the blob have been "patched" into real rust structs
 
 	is_patched : bool,
 }
@@ -545,8 +545,8 @@ impl VecBlob
 
 
 /// `BlobWriterPass` handles two things:
-/// 	1. Recursion over the given structure, via the WriteBlob trait
-/// 	2. Accounting for padding between data with different alignment
+///   1. Recursion over the given structure, via the WriteBlob trait
+///   2. Accounting for padding between data with different alignment
 
 pub trait BlobWriterPass : Sized
 {
