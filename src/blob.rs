@@ -156,6 +156,18 @@ pub enum ReadBlobError
 	/// Info in the blob's header about the vec table doesn't make sense
 	
 	InvalidHeaderVecTable,
+	
+	/// Info in the blob's header about the box table doesn't make sense
+	
+	InvalidHeaderBoxTable,
+
+	/// A reference table entry (vec, box, etc.) refers to an invalid location
+
+	InvalidReferenceTableEntry,
+
+	/// A reference refers to an invalid location
+
+	InvalidReferenceLocation,
 }
 
 
@@ -195,10 +207,15 @@ struct BlobHeader
 	data_byte_count		: usize,
 	data_location		: BlobLocation,
 
-	/// Info about the vec table, for patching
+	/// Info about all vecs in the data buffer, for patching
 
 	vec_table_count		: usize,
 	vec_table_location 	: BlobLocation,
+
+	/// Info about all boxes in the data buffer, for patching
+
+	box_table_count		: usize,
+	box_table_location 	: BlobLocation,
 }
 
 impl Blob
@@ -236,7 +253,9 @@ impl Blob
 			is_patched: false,
 		};
 		
-		if !blob.check_valid_location_for_type::<BlobHeader, SKIP_ASSERTS>(BlobLocation::start())
+		if !blob.check_valid_location_for_type::<BlobHeader, SKIP_ASSERTS>(
+			BlobLocation::start(),
+		)
 		{
 			return Err(FailedToGetHeader);
 		}
@@ -259,9 +278,15 @@ impl Blob
 			return Err(InvalidHeaderVecTable);
 		}
 
+		if header.box_table_count > 0 &&
+			!blob.check_valid_location_for_type::<u8, SKIP_ASSERTS>(header.box_table_location)
+		{
+			return Err(InvalidHeaderBoxTable);
+		}
+
 		// TODO (rs) Add source data layout signature to header, CRC?
 
-		unsafe { blob.patch_references(); }
+		unsafe { blob.try_patch_references() ?; }
 
 		Ok(blob)
 
@@ -296,6 +321,9 @@ impl Blob
 	
 				vec_table_count 	: 0,
 				vec_table_location 	: BlobLocation::new(EMPTY_VEC_TABLE_SIGNATURE),
+
+				box_table_count 	: 0,
+				box_table_location 	: BlobLocation::new(EMPTY_VEC_TABLE_SIGNATURE),
 			};
 		}
 
@@ -306,10 +334,7 @@ impl Blob
 	where
 		T : WriteBlob
 	{
-		let mut writer = BlobWriter::new();
-		let data_start_location = writer.write_slice(std::slice::from_ref(value));
-		let blob = writer.finish(data_start_location);
-
+		let blob = write_blob(value);
 		assert!(!blob.is_patched, "BlobWriter always returns an unpatched blob");
 
 		blob
@@ -319,27 +344,37 @@ impl Blob
 	{
 		assert!(self.is_patched, "Can't call as_ref on a blob that hasn't been patched");
 
-		let data_location = self.get_header().data_location;
-		&*self.location_as_ptr(data_location)
+		let ptr = self.location_as_ptr(self.get_header().data_location);
+		(&*ptr).assume_init_ref()
 	}
 
 	// Header access is generally safe, for any initialized blob
 
 	fn get_header_mut(&mut self) -> &mut BlobHeader
 	{
-		// NOTE (rs) Safe, since we always initialize a Blob with enough space for a header
+		// NOTE (rs) Safe, since we always initialize a Blob with a valid header
 
-		unsafe { &mut *self.location_as_ptr_mut(BlobLocation::start()) }
+		unsafe
+		{
+			let ptr = self.location_as_ptr_mut(BlobLocation::start());
+			(&mut *ptr).assume_init_mut()
+		}
 	}
 
 	fn get_header(&self) -> &BlobHeader
 	{
-		unsafe { &*self.location_as_ptr(BlobLocation::start()) }
+		// NOTE (rs) Safe, since we always initialize a Blob with a valid header
+
+		unsafe
+		{
+			let ptr = self.location_as_ptr(BlobLocation::start());
+			(&*ptr).assume_init_ref()
+		}
 	}
 
 	/// Reinterpret a position in the data blob as some arbitrary data type
 
-	fn location_as_ptr<T>(&self, location : BlobLocation) -> *const T
+	fn location_as_ptr<T>(&self, location : BlobLocation) -> *const std::mem::MaybeUninit<T>
 	{
 		if config::ENABLE_ASSERTS
 		{
@@ -347,12 +382,12 @@ impl Blob
 		}
 
 		let byte_ptr = &self.bytes[location.offset] as *const u8;
-		byte_ptr as *const T
+		byte_ptr as *const std::mem::MaybeUninit<T>
 	}
 	
 	/// Reinterpret a position in the data blob as some arbitrary data type
 	
-	fn location_as_ptr_mut<T>(&mut self, location : BlobLocation) -> *mut T
+	fn location_as_ptr_mut<T>(&mut self, location : BlobLocation) -> *mut std::mem::MaybeUninit<T>
 	{
 		if config::ENABLE_ASSERTS
 		{
@@ -360,63 +395,72 @@ impl Blob
 		}
 
 		let byte_ptr = &mut self.bytes[location.offset] as *mut u8;
-		byte_ptr as *mut T
+		byte_ptr as *mut std::mem::MaybeUninit<T>
 	}
 
 	/// Convert buffer offsets into real pointers
 
-	unsafe fn patch_references(&mut self)
+	unsafe fn try_patch_references(&mut self) -> Result<(), ReadBlobError>
 	{
 		assert!(!self.is_patched, "Can't call patch_references on a blob that's already patched");
 
-		// Get the vec table from the blob's header
+		// NOTE (rs) By the time we're in here we know the reference tables contain at least
+		//  somewhat reasonable data.
 
-		// NOTE (rs) By the time we're in here we know the vec table contains
-		//  at least somewhat reasonable data.
+		let vec_table_count;
+		let vec_table_location;
 
-		let (vec_table_count, vec_table_location) =
+		let box_table_count;
+		let box_table_location;
+
 		{
 			let header = self.get_header();
-			(header.vec_table_count, header.vec_table_location)
+
+			vec_table_count = header.vec_table_count;
+			vec_table_location = header.vec_table_location;
+
+			box_table_count = header.box_table_count;
+			box_table_location = header.box_table_location;
 		};
 
-		let vec_table_ptr = self.location_as_ptr::<BlobLocation>(vec_table_location)
-								as *const BlobLocation;
-
-		// Convert the VecBlob at each location
-
-		let vec_locations = std::slice::from_raw_parts(vec_table_ptr, vec_table_count);
-		for &vec_location in vec_locations
-		{
-			// NOTE (rs) We lose any info about the vec's original type, hence treating
-			//  them as Vec<u8> in all cases here.
-
-			type ErasedVec = Vec<u8>;
-			type UninitializedVec = std::mem::MaybeUninit<ErasedVec>;
-
-			// Create two views of the same data, first copying the unpatched data out
-			//  of the vec's original location, then switching to treat it as an
-			//  uninitialized region to write a real (patched) vec
-
-			let vec_blob = *self.location_as_ptr::<VecBlob>(vec_location);
-			let patched_vec_target = &mut *self.location_as_ptr_mut::<UninitializedVec>(vec_location);
-
-			// Construct the real vec (pointing into the data buffer)
-
-			let patched_vec =
-			{
-				let vec_data_ptr = self.location_as_ptr_mut::<u8>(vec_blob.data_location) as *mut u8;
-				Vec::from_raw_parts(vec_data_ptr, vec_blob.count, vec_blob.count)
-			};
-
-			// And emplace it into the appropriate buffer location
-
-			patched_vec_target.write(patched_vec);
-		}
+		self.try_patch_reference_table::<VecBlob>(vec_table_count, vec_table_location) ?;
+		self.try_patch_reference_table::<BoxBlob>(box_table_count, box_table_location) ?;
 
 		// Mark the blob as patched
 
 		self.is_patched = true;
+
+		Ok(())
+	}
+
+	unsafe fn try_patch_reference_table<T>(
+		&mut self,
+		location_count : usize,
+		table_location : BlobLocation
+	) -> Result<(), ReadBlobError>
+	where
+		T : PatchReference
+	{
+		// No patching if there are no locations to patch
+
+		if location_count == 0
+		{
+			return Ok(());
+		}
+
+		// Get the reference table following the info from the blob's header
+
+		let table_ptr = self.location_as_ptr::<BlobLocation>(table_location) as *const BlobLocation;
+		let locations = std::slice::from_raw_parts(table_ptr, location_count);
+
+		// Run the conversion at each location
+
+		for &location in locations
+		{
+			T::try_patch(self, location) ?;
+		}
+
+		Ok(())
 	}
 
 	// Helper assertions to sanity check that things are being used as expected
@@ -443,6 +487,14 @@ impl Blob
 			"Expected allocated blob buffer to always be aligned to {}B (found {}B)",
 				MAX_ALIGNMENT_SIZE,
 				allocated_buffer_address % MAX_ALIGNMENT_SIZE,
+		}
+
+		ASSERT!
+		{
+			MAX_ALIGNMENT_SIZE % BlobHeader::ALIGNMENT_SIZE == 0,
+			"Expected blob header to be able to be {}B aligned (found {}B)",
+				MAX_ALIGNMENT_SIZE,
+				BlobHeader::ALIGNMENT_SIZE,
 		}
 	}
 
@@ -523,6 +575,40 @@ impl Blob
 
 
 
+trait PatchReference : Sized+Copy
+{
+	type Patched;
+
+	unsafe fn try_patch(blob : &mut Blob, self_location : BlobLocation) -> Result<(), ReadBlobError>
+	{
+		if !blob.check_valid_location_for_type::<Self, SKIP_ASSERTS>(self_location)
+		{
+			return Err(ReadBlobError::InvalidReferenceTableEntry);
+		}
+
+		// Create two views of the same data, first copying the unpatched data out
+		//  of the references's original location, then switching to treat it as an
+		//  uninitialized region to write a real (patched) reference
+
+		// NOTE (rs) We lose any info about the reference's original type
+
+		let unpatched = (*blob.location_as_ptr::<Self>(self_location)).assume_init();
+		let patched_ptr = blob.location_as_ptr_mut::<Self::Patched>(self_location);
+
+		// Create the real patched reference type (pointing into the data buffer)
+
+		let patched = unpatched.try_into_patched(blob) ?;
+
+		// ... and emplace it into the original buffer location
+
+		(*patched_ptr).write(patched);
+
+		Ok(())
+	}
+
+	unsafe fn try_into_patched(self, blob : &mut Blob) -> Result<Self::Patched, ReadBlobError>;
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct VecBlob
@@ -536,12 +622,68 @@ impl VecBlob
 {
 	pub fn new(count : usize, data_location : BlobLocation) -> Self
 	{
+		ASSERT_LAYOUT_EQ!(Self, Vec<u8>);
+		ASSERT_LAYOUT_EQ!(Self, Vec<String>);
+
 		Self
 		{
 			signature : VEC_BLOB_SIGNATURE,
 			count,
 			data_location,
 		}
+	}
+}
+
+impl PatchReference for VecBlob
+{
+	type Patched = Vec<u8>;
+	
+	unsafe fn try_into_patched(self, blob : &mut Blob) -> Result<Self::Patched, ReadBlobError>
+	{
+		if !blob.check_valid_location_for_type::<Self::Patched, SKIP_ASSERTS>(self.data_location)
+		{
+			return Err(ReadBlobError::InvalidReferenceLocation);
+		}
+
+		let data_ptr = blob.location_as_ptr_mut::<u8>(self.data_location) as *mut u8;
+		Ok(Vec::from_raw_parts(data_ptr, self.count, self.count))
+	}
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct BoxBlob
+{
+	data_location	: BlobLocation,
+}
+
+impl BoxBlob
+{
+	pub fn new(data_location : BlobLocation) -> Self
+	{
+		ASSERT_LAYOUT_EQ!(Self, Box<u8>);
+		ASSERT_LAYOUT_EQ!(Self, Box<String>);
+
+		Self
+		{
+			data_location,
+		}
+	}
+}
+
+impl PatchReference for BoxBlob
+{
+	type Patched = Box<u8>;
+
+	unsafe fn try_into_patched(self, blob : &mut Blob) -> Result<Self::Patched, ReadBlobError>
+	{
+		if !blob.check_valid_location_for_type::<Self::Patched, SKIP_ASSERTS>(self.data_location)
+		{
+			return Err(ReadBlobError::InvalidReferenceLocation);
+		}
+
+		let data_ptr = blob.location_as_ptr_mut::<u8>(self.data_location) as *mut u8;
+		Ok(Box::from_raw(data_ptr))
 	}
 }
 
@@ -562,24 +704,31 @@ pub trait BlobWriterPass : Sized
 		self_location 			: BlobLocation,
 		slice_start_location 	: BlobLocation);
 
+	fn on_handle_box(
+		&mut self,
+		self_location : BlobLocation,
+		data_location : BlobLocation);
+
 	// Common blob writer implementation, not expected to be overridden
 
-	fn add_slice<T>(&mut self, values : &[T]) -> BlobLocation
+	/// Returns the starting location of the first slice element, or `None` if
+	/// there aren't any values to write (it's up to the caller to interpret `None`,
+	/// possibly writing out a recognizable signature value)
+
+	fn add_slice<T>(&mut self, values : &[T]) -> Option<BlobLocation>
 	where
 		T : WriteBlob
 	{
-		// Early-out if there is no data to write. The specific offset returned doesn't
-		//  matter since it'll never be read, so use a recognizable signature
+		// Early-out if there is no data to write
 
 		if values.is_empty()
 		{
-			return BlobLocation::new(EMPTY_VEC_SIGNATURE);
+			return None;
 		}
 
 		// Ensure data is aligned, then write out a contiguous sequence containing each value
 
 		self.add_padding_for::<T>();
-		
 		let slice_start_location = self.next_location();
 		
 		ASSERT!
@@ -611,10 +760,10 @@ pub trait BlobWriterPass : Sized
 			value.handle_references(self, value_location);
 		}
 
-		// Return the location of the slice, so other the caller can know where the
-		//  data ended up within the blob
+		// Return the location of the slice, so the caller can know where the data ended
+		//  up after adding any padding
 
-		slice_start_location
+		Some(slice_start_location)
 	}
 
 	fn add_padding_for<T>(&mut self)
@@ -653,15 +802,35 @@ pub trait BlobWriterPass : Sized
 	{
 		// Write out a contigious slice continaining all the values
 
-		let slice_start_location = self.add_slice(values.as_slice());
+		let slice_start_location = match self.add_slice(values.as_slice())
+		{
+			Some(location) 	=> location,
+			None 			=> BlobLocation::new(EMPTY_VEC_SIGNATURE),
+		};
 
-		// Rewrite original vec data to put it in blob-local space (if applicable)
+		// Keep track of vec references
 
 		self.on_handle_vec(values.len(), self_location, slice_start_location);
 
 		// NOTE (rs) Treating rust Vec as a black box with no field layout guarantees
 
 		ASSERT_LAYOUT_EQ!(VecBlob, Vec<T>);
+	}
+
+	fn handle_box<T>(&mut self, self_location : BlobLocation, value : &Box<T>)
+	where
+		T : WriteBlob
+	{
+		// Write out the referenced value
+
+		let data_location = self.add_slice(std::slice::from_ref(value.as_ref()))
+									.expect("Wrote a box blob with no data?");
+
+		// Keep track of box references
+
+		self.on_handle_box(self_location, data_location);
+
+		ASSERT_LAYOUT_EQ!(BoxBlob, Box<T>);
 	}
 }
 
@@ -671,120 +840,131 @@ pub trait BlobWriterPass : Sized
 
 struct BlobWriter
 {
-	blob 					: Blob,
-	vec_locations 			: Vec<BlobLocation>,
+	blob 			: Blob,
+	vec_locations 	: Vec<BlobLocation>,
+	box_locations 	: Vec<BlobLocation>,
 }
 
-impl BlobWriter
+fn write_blob<T>(value : &T) -> Blob
+where
+	T : WriteBlob
 {
-	fn new() -> Self
+	let single_slice = std::slice::from_ref(value);
+
+	let mut writer = BlobWriter
 	{
-		Self
-		{
-			blob 			: Blob::empty(),
-			vec_locations 	: Vec::new(),
-		}
-	}
+		blob 			: Blob::empty(),
+		vec_locations 	: Vec::new(),
+		box_locations	: Vec::new(),
+	};
 
-	fn finish(mut self, data_start_location : BlobLocation) -> Blob
+	// First, do a "dry run" which just counts the total number of bytes we're
+	//  going to write (including padding and all referenced data)
+
+	let mut dry_run = BlobWriterDryRun::new(&writer);
+	let expected_padding_start_locaton = dry_run.next_location();
+	let expected_data_start_location = dry_run.add_slice(single_slice)
+										.expect("Writing no data?");
+	let expected_data_end_location = dry_run.next_location();
+
+	// Then do the same for writing out reference metadata, pre-allocating and
+	//  handing allocations off the actual writer to avoid redundant work
+
+	let mut dummy_vec_locations = vec![BlobLocation::start(); dry_run.vec_count];
+	let expected_vec_table_start_location = dry_run.add_slice(&dummy_vec_locations);
+	let expected_vec_table_end_location = dry_run.next_location();
+
+	dummy_vec_locations.clear();
+	writer.vec_locations = dummy_vec_locations;
+	
+	let mut dummy_box_locations = vec![BlobLocation::start(); dry_run.box_count];
+	let expected_box_table_start_location = dry_run.add_slice(&dummy_box_locations);
+	let expected_box_table_end_location = dry_run.next_location();
+
+	dummy_box_locations.clear();
+	writer.box_locations = dummy_box_locations;
+
+	let _ = dry_run.add_slice(std::slice::from_ref(&END_BLOB_SIGNATURE));
+	let expected_blob_end_location = dry_run.end_location;
+
+	// Pre-allocate enough space to fit the total size we computed for both data
+	//  and reference metadata
+
+	let expected_additional_byte_count =
+		expected_blob_end_location.offset - expected_padding_start_locaton.offset;
+	
+	writer.blob.bytes.reserve_exact(expected_additional_byte_count);
+	let expected_allocation_size = writer.blob.bytes.capacity();
+
+	// Write out the actual data and sanity check that sizes match the dry run
+
+	let data_start_location = writer.add_slice(single_slice).expect("Writing no data?");
+	let data_end_location = writer.next_location();
+
+	ASSERT! { expected_data_start_location == data_start_location }
+	ASSERT! { expected_data_end_location == data_end_location };
+
+	// Write out reference metadata and sanity check that sizes match the dry run
+
+	// BB (rs) Need to do a bit of shuffling to avoid mostly-reasonable borrow
+	//  checker semantics when calling self.write_slice(...). It could technically
+	//  end up modifying self.vec_locations, though we know it won't because we
+	//  aren't adding a new vecs.
+
+	let vec_table = std::mem::take(&mut writer.vec_locations);
+	let vec_table_location = writer.add_slice(&vec_table);
+	ASSERT! { vec_table.len() == dry_run.vec_count }
+	ASSERT! { expected_vec_table_start_location == vec_table_location }
+	ASSERT! { expected_vec_table_end_location == writer.next_location() }
+
+	let box_table = std::mem::take(&mut writer.box_locations);
+	let box_table_location = writer.add_slice(&box_table);
+	ASSERT! { box_table.len() == dry_run.box_count }
+	ASSERT! { expected_box_table_start_location == box_table_location }
+	ASSERT! { expected_box_table_end_location == writer.next_location() }
+
+	ASSERT! { writer.vec_locations.is_empty(), "Added new vecs when writing reference tables?" }
+	ASSERT! { writer.box_locations.is_empty(), "Added new boxes when writing reference tables?" }
+
+	let _ = writer.add_slice(std::slice::from_ref(&END_BLOB_SIGNATURE));
+	ASSERT! { expected_blob_end_location == writer.next_location() }
+
+	// Track metadata in the blob header, starting with the total size of the data region
+
+	let header = writer.blob.get_header_mut();
+
+	header.data_byte_count = data_end_location.offset - data_start_location.offset;
+	header.data_location = data_start_location;
+
+	ASSERT! { header.data_byte_count > 0 }
+
+	// Then track reference table info
+
+	ASSERT! { header.vec_table_count == 0 };
+	header.vec_table_count = vec_table.len();
+	header.vec_table_location = match vec_table_location
 	{
-		// Track the total size of the data region
-
-		let data_end_location = self.next_location();
-		let data_byte_count = data_end_location.offset - data_start_location.offset;
-
-		ASSERT! { data_byte_count > 0 }
-
-		let header = self.blob.get_header_mut();
-
-		header.data_byte_count = data_byte_count;
-		header.data_location = data_start_location;
-
-		// Track all the vecs we added to the blob
-
-		self.add_vec_table();
-
-		// Unwrap the blob data for consumption
-
-		self.blob
-	}
-
-	/// returns location of the start of the slice (post-padding)
-
-	fn write_slice<T>(&mut self, slice : &[T]) -> BlobLocation
-	where
-		T : WriteBlob
+		Some(location) 	=> location,
+		None			=> BlobLocation::new(EMPTY_VEC_TABLE_SIGNATURE),
+	};
+	
+	ASSERT! { header.box_table_count == 0 };
+	header.box_table_count = box_table.len();
+	header.box_table_location = match box_table_location
 	{
-		ASSERT! { !slice.is_empty(), "Should early exit before calling write_slice with no data" }
+		Some(location) 	=> location,
+		None			=> BlobLocation::new(EMPTY_BOX_TABLE_SIGNATURE),
+	};
 
-		let padding_start_location = self.next_location();
+	// Check to see if we ended up needing to reallocate. Not really a problem per-se,
+	//  but it's wasteful, hence all the work up front to get a total size and pre-allocate
+	
+	ASSERT! { expected_allocation_size == writer.blob.bytes.capacity() }
+	ASSERT! { expected_allocation_size == writer.blob.bytes.len() }
 
-		// First, do a "dry run" which just counts the total number of bytes we're
-		//  going to write (including padding and all reference fields)
-		
-		let expected_end_location =
-		{
-			let mut dry_run = BlobWriterDryRun::new(padding_start_location);
-			dry_run.add_slice(slice);
-			
-			dry_run.next_location()
-		};
+	// Unwrap the blob data for consumption
 
-		// Pre-allocate enough space to fit the total size we computed and write data
-
-		let expected_bytes_written = expected_end_location.offset - padding_start_location.offset;
-		self.blob.bytes.reserve_exact(expected_bytes_written);
-
-		let slice_start_location = self.add_slice(slice);
-		let actual_end_location = self.next_location();
-
-		// Reallocation isn't problematic, but can be costly, hence all the effort to
-		//  count bytes and pre-allocate up front
-
-		ASSERT!
-		{
-			actual_end_location == expected_end_location,
-			"Reallocated during blob write (expected {}B, wrote {}B)",
-				expected_bytes_written,
-				actual_end_location.offset - padding_start_location.offset,
-		}
-
-		slice_start_location
-	}
-
-	fn add_vec_table(&mut self)
-	{
-		// Don't bother writing anything if there aren't any locations to write. This
-		//  keeps the empty vec table signature around, which can be helpful for debugging.
-
-		if self.vec_locations.is_empty()
-		{
-			return;
-		}
-
-		// First, append all the vec locations for the blob to the end of the data
-
-		// BB (rs) Need to do a bit of shuffling to avoid mostly-reasonable borrow
-		//  checker semantics when calling self.write_slice(...). It could technically
-		//  end up modifying self.vec_locations, though we know it won't because we
-		//  aren't adding a new vecs.
-
-		// NOTE (rs) In theory we could swap vec_locations back into self.vec_locations,
-		//  but in practice we no longer need it, so just dropping it here.
-
-		let vec_table = std::mem::take(&mut self.vec_locations);
-		let vec_table_location = self.write_slice(&vec_table);
-
-		ASSERT! { self.vec_locations.is_empty() }
-
-		// Second, cache off info about the newly-written vec table so we can reconstruct it later
-
-		let header = self.blob.get_header_mut();
-		ASSERT! { header.vec_table_count == 0, "Called add_vec_table multiple times?" };
-
-		header.vec_table_count = vec_table.len();
-		header.vec_table_location = vec_table_location;
-	}
+	writer.blob
 }
 
 impl BlobWriterPass for BlobWriter
@@ -816,15 +996,38 @@ impl BlobWriterPass for BlobWriter
 		slice_start_location 	: BlobLocation)
 	{
 		// Overwrite original buffer region with data using a known, fixed layout so we
-		//  can read it back in later, even if the layout of Vec itself changes
+		//  can read it back in later, even if the layout of the Vec type changes
 
-		let vec_img : &mut VecBlob = unsafe { &mut *self.blob.location_as_ptr_mut(self_location) };
-		*vec_img = VecBlob::new(count, slice_start_location);
+		unsafe
+		{
+			let vec_blob_ptr = self.blob.location_as_ptr_mut(self_location);
+			(*vec_blob_ptr).write(VecBlob::new(count, slice_start_location));
+		}
 
 		// Keep track of all vecs so we know where to look when we go to reconstruct them
 
 		self.vec_locations.push(self_location);
 	}
+	
+	fn on_handle_box(
+		&mut self,
+		self_location : BlobLocation,
+		data_location : BlobLocation)
+	{
+		// Overwrite original buffer region with an unpatched location
+
+		unsafe
+		{
+			let box_blob_ptr = self.blob.location_as_ptr_mut(self_location);
+			(*box_blob_ptr).write(BoxBlob::new(data_location));
+		}
+
+		// Keep track of all boxes so we know where to look when we go to reconstruct them
+
+		self.box_locations.push(self_location);
+	}
+
+	
 }
 
 /// `BlobWriterDryRun` is a pass that simply walks the input structure to simulate
@@ -833,16 +1036,20 @@ impl BlobWriterPass for BlobWriter
 
 struct BlobWriterDryRun
 {
-	end_location : BlobLocation,
+	end_location 	: BlobLocation,
+	vec_count 		: usize,
+	box_count		: usize,
 }
 
 impl BlobWriterDryRun
 {
-	fn new(start_location : BlobLocation) -> Self
+	fn new(writer : &BlobWriter) -> Self
 	{
 		Self
 		{
-			end_location : start_location,
+			end_location 	: writer.next_location(),
+			vec_count 		: writer.vec_locations.len(),
+			box_count 		: writer.box_locations.len(),
 		}
 	}
 }
@@ -865,31 +1072,44 @@ impl BlobWriterPass for BlobWriterDryRun
 		_self_location 			: BlobLocation,
 		_slice_start_location 	: BlobLocation)
 	{
-		// Don't care about patching when we're just counting bytes
+		// Count vecs so we know how big the vec table will be
+
+		self.vec_count += 1;
 	}
+	
+	fn on_handle_box(
+		&mut self,
+		_self_location : BlobLocation,
+		_data_location : BlobLocation)
+	{
+		// Count boxes so we know how big the box table will be
+
+		self.box_count += 1;
+	}
+
+	
 }
 
 
 
 // Anything that's plain ol' data can be trivially imaged
 
-pub trait HasNoReferences : Copy+Sized {}
-
-impl<T> WriteBlob for T
-where
-	T : HasNoReferences
-{
-	fn handle_references<Pass>(&self, _pass : &mut Pass, _self_location : BlobLocation)
-	where
-		Pass : BlobWriterPass
-	{}
-}
-
 macro_rules! impl_has_no_references
 {
 	{$($type:ty),*,} =>
 	{
-		$(impl HasNoReferences for $type {})*
+		$(
+			impl WriteBlob for $type
+			{
+				fn handle_references<Pass>(
+					&self,
+					_pass : &mut Pass,
+					_self_location : BlobLocation)
+				where
+					Pass : BlobWriterPass
+				{}
+			}
+		)*
 	};
 }
 
@@ -915,6 +1135,18 @@ where
 		Pass : BlobWriterPass
 	{
 		pass.handle_vec(self_location, self);
+	}
+}
+
+impl<T> WriteBlob for Box<T>
+where
+	T : WriteBlob
+{
+	fn handle_references<Pass>(&self, pass : &mut Pass, self_location : BlobLocation)
+	where
+		Pass : BlobWriterPass
+	{
+		pass.handle_box(self_location, self);
 	}
 }
 
@@ -944,8 +1176,10 @@ macro_rules! handle_field_references
 #[cfg(target_endian = "big")]
 compile_error!("Data blob module only supports little-endian systems");
 
+const END_BLOB_SIGNATURE 		: usize = compute_signature("BLOB*END");
 const EMPTY_BLOB_SIGNATURE 		: usize = compute_signature("NO*DATA*");
-const EMPTY_VEC_TABLE_SIGNATURE : usize = compute_signature("NO*VECS*");
+const EMPTY_VEC_TABLE_SIGNATURE : usize = compute_signature("ZERO*VEC");
+const EMPTY_BOX_TABLE_SIGNATURE : usize = compute_signature("ZERO*BOX");
 const VEC_BLOB_SIGNATURE 		: usize = compute_signature("VEC*BLOB");
 const EMPTY_VEC_SIGNATURE 		: usize = compute_signature("EMPTYVEC");
 
