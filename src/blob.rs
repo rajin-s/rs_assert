@@ -53,13 +53,10 @@ macro_rules! ASSERT_LAYOUT_EQ
 
 /// Trait indicating that a type can be written to a data blob.
 /// 
-/// Anything that is just data with a fixed layout (eg. integral types) can implement
-/// `HasNoReferences` to get a blanket impl of `WriteBlob` that does nothing.
-/// 
-/// Otherwise, if something has references (Vec, Box, Rc, etc.) then it needs to
-/// recursively call handle_references on those fields. In practice, this can be
-/// done by just calling handle_references on every field, which is what
-/// `#[derive(WriteBlob)]` does (TODO: implement derive)
+/// If something has references (Vec, Box, Rc, etc.) then it needs to recursively
+/// call handle_references on those fields. In practice, this can be done by just
+/// calling handle_references on every field, which is what `#[derive(WriteBlob)]`
+/// does (TODO: implement derive)
 /// 
 /// Structs implementing this trait MUST have a consistent memory layout, generally
 /// achieved using `#[repr(C)]`
@@ -68,7 +65,10 @@ pub trait WriteBlob
 {
 	fn handle_references<T>(&self, pass : &mut T, self_location : BlobLocation)
 	where
-		T : BlobWriterPass;
+		T : BlobWriterPass
+	{
+		let _ = (pass, self_location);
+	}
 }
 
 
@@ -250,7 +250,7 @@ impl Blob
 		let mut blob = Self
 		{
 			bytes,
-			is_patched: false,
+			is_patched : false,
 		};
 		
 		if !blob.check_valid_location_for_type::<BlobHeader, SKIP_ASSERTS>(
@@ -287,6 +287,7 @@ impl Blob
 		// TODO (rs) Add source data layout signature to header, CRC?
 
 		unsafe { blob.try_patch_references() ?; }
+		ASSERT! { blob.is_patched}
 
 		Ok(blob)
 
@@ -296,35 +297,34 @@ impl Blob
 
 	pub fn empty() -> Self
 	{
-		const HEADER_BYTE_COUNT : usize = size_of::<BlobHeader>();
-
 		let mut raw = Self
 		{
-			bytes 		: vec![0x00; HEADER_BYTE_COUNT],
+			bytes 		: vec![0x00; BlobHeader::BYTE_COUNT],
 			is_patched 	: false,
 		};
 
 		Blob::assert_valid_buffer(&raw.bytes);
 
-		// NOTE (rs) get_header_* is typically safe, except right here since it relies
-		//  on us initializing with enough space to store the header
+		let empty_header = BlobHeader
+		{
+			signature			: BLOB_SIGNATURE,
 
-		#[allow(unused_unsafe)]
+			data_byte_count 	: 0,
+			data_location		: BlobLocation::new(EMPTY_BLOB_SIGNATURE),
+
+			vec_table_count 	: 0,
+			vec_table_location 	: BlobLocation::new(EMPTY_VEC_TABLE_SIGNATURE),
+
+			box_table_count 	: 0,
+			box_table_location 	: BlobLocation::new(EMPTY_VEC_TABLE_SIGNATURE),
+		};
+
+		// NOTE (rs) Safe, since we allocated enough space for a header
+
 		unsafe
 		{
-			*raw.get_header_mut() = BlobHeader
-			{
-				signature			: BLOB_SIGNATURE,
-	
-				data_byte_count 	: 0,
-				data_location		: BlobLocation::new(EMPTY_BLOB_SIGNATURE),
-	
-				vec_table_count 	: 0,
-				vec_table_location 	: BlobLocation::new(EMPTY_VEC_TABLE_SIGNATURE),
-
-				box_table_count 	: 0,
-				box_table_location 	: BlobLocation::new(EMPTY_VEC_TABLE_SIGNATURE),
-			};
+			let header_ptr = raw.location_as_ptr_mut::<BlobHeader>(BlobLocation::start());
+			(*header_ptr).write(empty_header);
 		}
 
 		raw
@@ -341,25 +341,16 @@ impl Blob
 	}
 
 	pub unsafe fn as_ref<T>(&self) -> &T
+	where
+		T : WriteBlob
 	{
-		assert!(self.is_patched, "Can't call as_ref on a blob that hasn't been patched");
+		ASSERT! { self.is_patched, "Can't call as_ref on a blob that hasn't been patched" }
 
 		let ptr = self.location_as_ptr(self.get_header().data_location);
-		(&*ptr).assume_init_ref()
+		(*ptr).assume_init_ref()
 	}
 
 	// Header access is generally safe, for any initialized blob
-
-	fn get_header_mut(&mut self) -> &mut BlobHeader
-	{
-		// NOTE (rs) Safe, since we always initialize a Blob with a valid header
-
-		unsafe
-		{
-			let ptr = self.location_as_ptr_mut(BlobLocation::start());
-			(&mut *ptr).assume_init_mut()
-		}
-	}
 
 	fn get_header(&self) -> &BlobHeader
 	{
@@ -368,7 +359,18 @@ impl Blob
 		unsafe
 		{
 			let ptr = self.location_as_ptr(BlobLocation::start());
-			(&*ptr).assume_init_ref()
+			(*ptr).assume_init_ref()
+		}
+	}
+
+	fn get_header_mut(&mut self) -> &mut BlobHeader
+	{
+		// NOTE (rs) Safe, since we always initialize a Blob with a valid header
+
+		unsafe
+		{
+			let ptr = self.location_as_ptr_mut(BlobLocation::start());
+			(*ptr).assume_init_mut()
 		}
 	}
 
@@ -592,16 +594,16 @@ trait PatchReference : Sized+Copy
 
 		// NOTE (rs) We lose any info about the reference's original type
 
-		let unpatched = (*blob.location_as_ptr::<Self>(self_location)).assume_init();
-		let patched_ptr = blob.location_as_ptr_mut::<Self::Patched>(self_location);
-
+		let unpatched : Self = (*blob.location_as_ptr::<Self>(self_location)).assume_init();
+		let self_ptr = blob.location_as_ptr_mut::<Self::Patched>(self_location);
+		
 		// Create the real patched reference type (pointing into the data buffer)
-
+		
 		let patched = unpatched.try_into_patched(blob) ?;
-
+		
 		// ... and emplace it into the original buffer location
 
-		(*patched_ptr).write(patched);
+		(*self_ptr).write(patched);
 
 		Ok(())
 	}
@@ -835,7 +837,7 @@ pub trait BlobWriterPass : Sized
 }
 
 /// `BlobWriter` uses the `BlobWriterPass` machinery to create and add data to a `Blob`.
-/// Once all data is written, it appends additional metadata needed to patch itra-blob
+/// Once all data is written, it appends additional metadata needed to patch intra-blob
 /// references (`Vec`s, etc.)
 
 struct BlobWriter
@@ -908,8 +910,8 @@ where
 
 	// BB (rs) Need to do a bit of shuffling to avoid mostly-reasonable borrow
 	//  checker semantics when calling self.write_slice(...). It could technically
-	//  end up modifying self.vec_locations, though we know it won't because we
-	//  aren't adding a new vecs.
+	//  end up modifying self.vec/box_locations, though we know it won't because we
+	//  aren't adding any new references, just blob locations.
 
 	let vec_table = std::mem::take(&mut writer.vec_locations);
 	let vec_table_location = writer.add_slice(&vec_table);
@@ -926,6 +928,8 @@ where
 	ASSERT! { writer.vec_locations.is_empty(), "Added new vecs when writing reference tables?" }
 	ASSERT! { writer.box_locations.is_empty(), "Added new boxes when writing reference tables?" }
 
+	// Add and ending signature, purely as a debugging aide
+
 	let _ = writer.add_slice(std::slice::from_ref(&END_BLOB_SIGNATURE));
 	ASSERT! { expected_blob_end_location == writer.next_location() }
 
@@ -938,7 +942,7 @@ where
 
 	ASSERT! { header.data_byte_count > 0 }
 
-	// Then track reference table info
+	// Then track info for reference patching
 
 	ASSERT! { header.vec_table_count == 0 };
 	header.vec_table_count = vec_table.len();
@@ -1086,8 +1090,6 @@ impl BlobWriterPass for BlobWriterDryRun
 
 		self.box_count += 1;
 	}
-
-	
 }
 
 
@@ -1099,16 +1101,7 @@ macro_rules! impl_has_no_references
 	{$($type:ty),*,} =>
 	{
 		$(
-			impl WriteBlob for $type
-			{
-				fn handle_references<Pass>(
-					&self,
-					_pass : &mut Pass,
-					_self_location : BlobLocation)
-				where
-					Pass : BlobWriterPass
-				{}
-			}
+			impl WriteBlob for $type {}
 		)*
 	};
 }
@@ -1195,27 +1188,6 @@ where
 		let eight_bytes = std::mem::transmute::<&u8, &[u8;8]>(&bytes[0]);
 		std::mem::transmute_copy(eight_bytes)
 	}
-
-	// assert!(bytes.len() <= 8);
-
-	// let mut signature = 0u64;
-
-	// // Copy text bytes in reverse order, to match the order of bytes
-	// //  when inspecting memory in a little-endian system
-
-	// let mut next_byte_index = bytes.len();
-	// while next_byte_index > 0
-	// {
-	// 	next_byte_index -= 1;
-		
-	// 	let chunk = (bytes[next_byte_index] as u64) << (next_byte_index * 8);
-	// 	signature |= chunk;
-	// }
-		
-	// unsafe
-	// {
-	// 	std::mem::transmute_copy(&signature)
-	// }
 }
 
 fn get_padding_bytes(padding_byte_count : usize) -> &'static [u8]
