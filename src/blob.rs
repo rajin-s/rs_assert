@@ -61,7 +61,7 @@ macro_rules! ASSERT_LAYOUT_EQ
 /// Structs implementing this trait MUST have a consistent memory layout, generally
 /// achieved using `#[repr(C)]`
 
-pub trait WriteBlob
+pub trait WriteBlob : GetTypeInfo
 {
 	fn handle_references<T>(&self, pass : &mut T, self_location : BlobLocation)
 	where
@@ -76,7 +76,7 @@ pub trait WriteBlob
 /// A `BlobLocation` is simply an offset into a the bytes of a data blob
 
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, GetTypeInfo)]
 pub struct BlobLocation
 {
 	// BB (rs) Could save on blob size if these were 32-bit offsets... but that would
@@ -153,6 +153,11 @@ pub enum ReadBlobError
 
 	InvalidHeaderData,
 
+	/// The blob might contain valid data, but it doesn't match the requested
+	/// runtime type (because it was written with different data layout)
+
+	InvalidHeaderTypeHash,
+
 	/// Info in the blob's header about the vec table doesn't make sense
 	
 	InvalidHeaderVecTable,
@@ -207,6 +212,12 @@ struct BlobHeader
 	data_byte_count		: usize,
 	data_location		: BlobLocation,
 
+	/// Hash value to identify the layout of the data type, to protect against
+	/// trying to read a different type than was written (or perhaps an older
+	/// version of a type with a different layout)
+
+	data_type_hash		: u64,
+
 	/// Info about all vecs in the data buffer, for patching
 
 	vec_table_count		: usize,
@@ -241,7 +252,9 @@ impl Blob
 	/// to be reinterpreted. Will return an error if we detect malformed input data,
 	/// though it's still possible to produce false positives which will result in UB
 
-	pub fn try_read(bytes : Vec<u8>) -> Result<Self, ReadBlobError>
+	pub fn try_read<T>(bytes : Vec<u8>) -> Result<Self, ReadBlobError>
+	where
+		T : WriteBlob
 	{
 		use ReadBlobError::*;
 		
@@ -270,6 +283,12 @@ impl Blob
 			!blob.check_valid_location_for_type::<u8, SKIP_ASSERTS>(header.data_location)
 		{
 			return Err(InvalidHeaderData);
+		}
+
+		let expected_type_hash = T::type_hash();
+		if header.data_type_hash != expected_type_hash
+		{
+			return Err(InvalidHeaderTypeHash);
 		}
 
 		if header.vec_table_count > 0 &&
@@ -311,6 +330,8 @@ impl Blob
 
 			data_byte_count 	: 0,
 			data_location		: BlobLocation::new(EMPTY_BLOB_SIGNATURE),
+
+			data_type_hash		: UNKNOWN_TYPE_SIGNATURE,
 
 			vec_table_count 	: 0,
 			vec_table_location 	: BlobLocation::new(EMPTY_VEC_TABLE_SIGNATURE),
@@ -933,12 +954,13 @@ where
 	let _ = writer.add_slice(std::slice::from_ref(&END_BLOB_SIGNATURE));
 	ASSERT! { expected_blob_end_location == writer.next_location() }
 
-	// Track metadata in the blob header, starting with the total size of the data region
+	// Track metadata in the blob header, starting with the data region
 
 	let header = writer.blob.get_header_mut();
 
 	header.data_byte_count = data_end_location.offset - data_start_location.offset;
 	header.data_location = data_start_location;
+	header.data_type_hash = T::type_hash();
 
 	ASSERT! { header.data_byte_count > 0 }
 
@@ -1171,6 +1193,7 @@ compile_error!("Data blob module only supports little-endian systems");
 
 const END_BLOB_SIGNATURE 		: usize = compute_signature("BLOB*END");
 const EMPTY_BLOB_SIGNATURE 		: usize = compute_signature("NO*DATA*");
+const UNKNOWN_TYPE_SIGNATURE 	: u64 	= compute_signature("NO*TYPE*");
 const EMPTY_VEC_TABLE_SIGNATURE : usize = compute_signature("ZERO*VEC");
 const EMPTY_BOX_TABLE_SIGNATURE : usize = compute_signature("ZERO*BOX");
 const VEC_BLOB_SIGNATURE 		: usize = compute_signature("VEC*BLOB");

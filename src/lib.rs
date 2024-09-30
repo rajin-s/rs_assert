@@ -30,3 +30,4 @@ pub use id::*;
 
 pub mod blob;
 pub mod type_signature;
+pub use type_signature::*;
