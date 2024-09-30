@@ -56,7 +56,7 @@ macro_rules! ASSERT_LAYOUT_EQ
 /// If something has references (Vec, Box, Rc, etc.) then it needs to recursively
 /// call handle_references on those fields. In practice, this can be done by just
 /// calling handle_references on every field, which is what `#[derive(WriteBlob)]`
-/// does (TODO: implement derive)
+/// does.
 /// 
 /// Structs implementing this trait MUST have a consistent memory layout, generally
 /// achieved using `#[repr(C)]`

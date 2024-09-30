@@ -3,6 +3,10 @@
 
 
 
+// Proc macros
+
+pub use proc_macro::*;
+
 // General library config
 
 pub mod config;
@@ -25,3 +29,4 @@ pub use id::*;
 // Memory images
 
 pub mod blob;
+pub mod type_signature;
