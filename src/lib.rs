@@ -1,3 +1,5 @@
+#![allow(clippy::assertions_on_constants)] // Allow asserts on constants (for const functions)
+
 #![feature(allocator_api)]			// for scratch allocator
 #![feature(alloc_layout_extra)]		//  ...
 

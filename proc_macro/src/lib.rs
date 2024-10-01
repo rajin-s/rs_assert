@@ -24,7 +24,7 @@ pub fn derive_write_blob(input_stream : proc_macro::TokenStream) -> proc_macro::
 				#[automatically_derived]
 				impl WriteBlob for #struct_name
 				{
-					fn handle_references<Pass>(
+					fn unpatch_references<Pass>(
 						&self,
 						pass : &mut Pass,
 						self_location : BlobLocation)
@@ -32,7 +32,7 @@ pub fn derive_write_blob(input_stream : proc_macro::TokenStream) -> proc_macro::
 						Pass : BlobWriterPass
 					{
 						#(
-							self.#field_names.handle_references(
+							self.#field_names.unpatch_references(
 								pass,
 								self_location + std::mem::offset_of!(Self, #field_names)
 							);
