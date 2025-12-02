@@ -8,7 +8,9 @@ resolver= "2"
 
 [features]
 
-default = []
+default = [
+	"mode.test" # NOTE (rs) test is the default mode to make things like bacon or rust-analyzer happy
+]
 
 # Assert features
 

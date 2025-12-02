@@ -33,3 +33,15 @@ pub use id::*;
 pub mod blob;
 pub mod type_signature;
 pub use type_signature::*;
+
+
+
+// Tests
+// BB (rs) Managing features for tests like this feels gross
+
+#[test]
+#[should_panic]
+fn valid_build_config()
+{
+	ASSERT! { false, "Expected panic_on_asserts for tests" }
+}
