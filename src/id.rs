@@ -49,7 +49,7 @@ pub struct Id<T>
 
 impl<T> Id<T>
 {
-	pub fn compute_hash(text : &str) -> u64
+	pub fn compute_raw_value(text : &str) -> u64
 	{
 		let mut hasher = DefaultHasher::new();
 		text.hash(&mut hasher);
@@ -57,11 +57,11 @@ impl<T> Id<T>
 		hasher.finish()
 	}
 
-	pub fn new(text : &str) -> Self
+	pub fn compute(text : &str) -> Self
 	{
 		let id = Self
 		{
-			value 	: Self::compute_hash(text),
+			value 	: Self::compute_raw_value(text),
 			_t		: Default::default(),
 		};
 
@@ -171,13 +171,13 @@ where
 pub type IdMap<T, Value> =
 	std::collections::HashMap<Id<T>, Value, id_internal::BuildIdHasher>;
 
-pub trait ExtIdMap
+pub trait IdMapExtensions
 {
 	fn new() -> Self;
 	fn with_capacity(capacity : usize) -> Self;
 }
 
-impl<T, TId> ExtIdMap for IdMap<T, TId>
+impl<T, TId> IdMapExtensions for IdMap<T, TId>
 {
 	fn new() -> Self
 	{
@@ -273,6 +273,8 @@ mod id_internal
 		}
 	}
 
+
+	
 	#[cfg(feature="name_cache")]
 	lazy_static::lazy_static!
 	{
@@ -338,7 +340,7 @@ where
 	
 		for name_string in name_strings
 		{
-			let _ = Name::new(name_string);
+			let _ = Name::compute(name_string);
 		}
 	}
 }
@@ -350,7 +352,7 @@ where
 #[test]
 fn test_name()
 {
-	let name = Name::new("hello");
+	let name = Name::compute("hello");
 	let expected_value = 16156531084128653017u64;
 
 	ASSERT!
@@ -365,7 +367,7 @@ fn test_name()
 #[test]
 fn test_name_types()
 {
-	let name = Name::new("hello");
+	let name = Name::compute("hello");
 	let expected_value = 16156531084128653017u64;
 
 	struct Foo {}
@@ -377,7 +379,7 @@ fn test_name_types()
 		}
 	}
 
-	let foo_id : Id<Foo> = Id::new("hello");
+	let foo_id : Id<Foo> = Id::compute("hello");
 
 	ASSERT!
 	{
@@ -400,14 +402,12 @@ fn test_name_map()
 
 	for &name_string in name_strings.iter()
 	{
-		name_map.insert(Name::new(name_string), String::from(name_string));
+		name_map.insert(Name::compute(name_string), String::from(name_string));
 	}
 
 	for (name, value) in name_map.iter()
 	{
-		let mut h = id_internal::BuildIdHasher::new().build_hasher();
-		name.hash(&mut h);
-		let hash_value = h.finish();
+		let hash_value = id_internal::BuildIdHasher::new().hash_one(name);
 		
 		ASSERT! { name.raw_value() == hash_value }
 
@@ -424,7 +424,7 @@ fn test_name_map()
 		}
 	}
 
-	let name_to_check = Name::new("foo");
+	let name_to_check = Name::compute("foo");
 	ASSERT! { name_map.contains_key(&name_to_check) };
 }
 
@@ -439,7 +439,7 @@ fn test_init_name_cache()
 
 	for &name_string in init_names.iter()
 	{
-		let raw_value = Name::compute_hash(name_string);
+		let raw_value = Name::compute_raw_value(name_string);
 		let no_cache_name = Name::from_raw_value(raw_value);
 
 		match no_cache_name.lookup_str()
@@ -469,9 +469,9 @@ fn test_name_lookup()
 {
 	let name_string = "foo";
 
-	let name = Name::new(name_string);
+	let name = Name::compute(name_string);
 	ASSERT! { name.lookup_str() == name_string }
 	
-	let name2 = Name::new(name_string);
+	let name2 = Name::compute(name_string);
 	ASSERT! { name2.lookup_str() == name_string }
 }
