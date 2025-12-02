@@ -18,6 +18,8 @@ where
 	const ALIGNMENT_SIZE 	: usize = align_of::<T>();
 }
 
+const MAX_ALIGNMENT_SIZE : usize = u128::ALIGNMENT_SIZE;
+
 /// Helper macro to validate that the size and alignment of two types are the
 /// same, in case we end up trying to transmute between them.
 /// 
@@ -63,12 +65,9 @@ macro_rules! ASSERT_LAYOUT_EQ
 
 pub trait WriteBlob : GetTypeInfo
 {
-	fn unpatch_references<T>(&self, pass : &mut T, self_location : BlobLocation)
+	fn unpatch_references<Pass>(&self, pass : &mut Pass, self_location : BlobLocation)
 	where
-		T : BlobWriterPass
-	{
-		let _ = (pass, self_location);
-	}
+		Pass : BlobWriterPass;
 }
 
 
@@ -332,13 +331,11 @@ trait Blob
 		// BB (rs) AVX tho?
 
 		let allocated_buffer_address = self.as_bytes().as_ptr() as usize;
-
-		const MAX_ALIGNMENT_SIZE : usize = 8;
 	
 		ASSERT!
 		{
 			allocated_buffer_address % MAX_ALIGNMENT_SIZE == 0,
-			"Expected allocated blob buffer to always be aligned to {}B (found {}B)",
+			"Expected allocated blob buffer to always be aligned to {}B ({}B off)",
 				MAX_ALIGNMENT_SIZE,
 				allocated_buffer_address % MAX_ALIGNMENT_SIZE,
 		}
@@ -496,9 +493,9 @@ where T : WriteBlob
 	/// # Safety
 	/// 
 	/// By the time we have a PatchedBlob instance we're reasonably certain that it
-	/// should be able to be interpreted as a real instance. The contents have been
-	/// validated, including that the layout matches the expected type, and all
-	/// references have been patched.
+	/// should be able to be interpreted as a real data. The contents have been
+	/// validated, including checking that the layout matches the expected type, and
+	/// all references have been patched.
 	/// 
 	/// However, since we're dealing with arbitrary input data it's not possible to
 	/// be 100% sure that the content really is valid, hence marking this as unsafe.
@@ -512,7 +509,7 @@ where T : WriteBlob
 
 	/// Takes in an arbitrary buffer and tries to read it into a *patched* Blob, ready
 	/// to be reinterpreted. Will return an error if we detect malformed input data,
-	/// though it's still possible to produce false positives which will result in UB
+	/// though it's still possible to produce false positives which will result in UB.
 
 	pub fn try_read(bytes : Vec<u8>) -> Result<Self, ReadBlobError>
 	{
@@ -1179,7 +1176,13 @@ macro_rules! impl_has_no_references
 	{$($type:ty),*,} =>
 	{
 		$(
-			impl WriteBlob for $type {}
+			impl WriteBlob for $type
+			{
+				fn unpatch_references<Pass>(&self, _ : &mut Pass, _ : BlobLocation)
+				where
+					Pass : BlobWriterPass
+				{}
+			}
 		)*
 	};
 }
@@ -1281,3 +1284,11 @@ fn get_padding_bytes(padding_byte_count : usize) -> &'static [u8]
 
 	&full_sequence.as_bytes()[0..padding_byte_count]
 }
+
+
+
+// Tests
+
+#[cfg(test)]
+#[path = "./blob_tests.rs"]
+mod blob_tests;
